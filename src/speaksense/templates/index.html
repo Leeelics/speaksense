@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SpeakSense - Speech Analysis</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .container { text-align: center; }
+        .record-btn { background: #007bff; color: white; border: none; padding: 15px 30px; border-radius: 5px; font-size: 16px; cursor: pointer; margin: 10px; }
+        .record-btn:hover { background: #0056b3; }
+        .record-btn:disabled { background: #ccc; cursor: not-allowed; }
+        .results { margin-top: 30px; text-align: left; }
+        .metric { background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .filler-high { color: #dc3545; }
+        .filler-medium { color: #ffc107; }
+        .filler-low { color: #28a745; }
+        #status { margin: 20px 0; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 SpeakSense</h1>
+        <p>Record your speech and get instant analysis to improve your presentation skills</p>
+        
+        <button id="recordBtn" class="record-btn">Start Recording</button>
+        <button id="stopBtn" class="record-btn" disabled>Stop Recording</button>
+        
+        <div id="status"></div>
+        
+        <div id="results" class="results" style="display: none;">
+            <h3>Analysis Results</h3>
+            <div id="metrics"></div>
+            <div class="metric">
+                <h4>Transcript</h4>
+                <p id="transcript"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        
+        const recordBtn = document.getElementById('recordBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const status = document.getElementById('status');
+        const results = document.getElementById('results');
+        
+        recordBtn.addEventListener('click', startRecording);
+        stopBtn.addEventListener('click', stopRecording);
+        
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+                
+                mediaRecorder.onstop = uploadAndAnalyze;
+                
+                mediaRecorder.start();
+                recordBtn.disabled = true;
+                stopBtn.disabled = false;
+                status.textContent = '🔴 Recording...';
+                results.style.display = 'none';
+            } catch (err) {
+                status.textContent = 'Error: Could not access microphone';
+            }
+        }
+        
+        function stopRecording() {
+            mediaRecorder.stop();
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            recordBtn.disabled = false;
+            stopBtn.disabled = true;
+            status.textContent = '⏳ Processing...';
+        }
+        
+        async function uploadAndAnalyze() {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+            const formData = new FormData();
+            formData.append('file', audioBlob, 'recording.wav');
+            
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayResults(result.analysis);
+                    status.textContent = '✅ Analysis complete!';
+                } else {
+                    status.textContent = '❌ Error: ' + result.error;
+                }
+            } catch (err) {
+                status.textContent = '❌ Error uploading audio';
+            }
+        }
+        
+        function displayResults(analysis) {
+            const metrics = document.getElementById('metrics');
+            const transcript = document.getElementById('transcript');
+            
+            let fillerClass = 'filler-low';
+            if (analysis.filler_rate > 10) fillerClass = 'filler-high';
+            else if (analysis.filler_rate > 5) fillerClass = 'filler-medium';
+            
+            metrics.innerHTML = `
+                <div class="metric">
+                    <h4>📊 Speech Metrics</h4>
+                    <p><strong>Total Words:</strong> ${analysis.total_words}</p>
+                    <p><strong>Filler Words:</strong> <span class="${fillerClass}">${analysis.filler_count} (${analysis.filler_rate}%)</span></p>
+                </div>
+                <div class="metric">
+                    <h4>🎯 Filler Breakdown</h4>
+                    ${Object.entries(analysis.filler_details).map(([word, count]) => 
+                        `<p><strong>"${word}":</strong> ${count} times</p>`
+                    ).join('')}
+                </div>
+            `;
+            
+            transcript.textContent = analysis.transcript;
+            results.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
